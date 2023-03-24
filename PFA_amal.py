@@ -266,7 +266,7 @@ class PFA_Amalgamator():
             # decoder loss
             loss_recons += sum([F.mse_loss(_ft, ft) for (_ft, ft) in zip(_fts, fts)])
 
-        # 输出kd损失
+        # kd loss
         loss_kd = kldiv(s_out, torch.cat([t0_out, t1_out], dim=1))
         loss_dict = {"loss_kd": self.args.kd * loss_kd,
                      "loss_amal": self.args.amal * loss_amal,
