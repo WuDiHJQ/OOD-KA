@@ -11,54 +11,58 @@ import time
 import os
 from engine.utils import move_to_device, set_mode
 
+
 class AmalBlock(nn.Module):
-    # 特征融合模块 实现从cts 到 cs的学习
+    # amalgamation block
     # cs channel student
     # cts channel teachers
     # fs feature student
     # fts feature teachers
-    # enc encoder conv 教师cat2学生
-    # fam 特征自适应模块
-    # dec decoder conv 学生2教师cat
-    # rep 压缩表征
+    # enc encoder
+    # fam feature adapt module
+    # dec decoder
+    # rep representation
     def __init__(self, cs, cts):
-        super( AmalBlock, self ).__init__()
+        super(AmalBlock, self).__init__()
         self.cs, self.cts = cs, cts
-        self.enc = nn.Conv2d( in_channels=sum(self.cts), out_channels=self.cs, kernel_size=1, stride=1, padding=0, bias=True )
-        self.fam = nn.Conv2d( in_channels=self.cs, out_channels=self.cs, kernel_size=1, stride=1, padding=0, bias=True )
-        self.dec = nn.Conv2d( in_channels=self.cs, out_channels=sum(self.cts), kernel_size=1, stride=1, padding=0, bias=True )
-    
+        self.enc = nn.Conv2d(in_channels=sum(self.cts), out_channels=self.cs, kernel_size=1, stride=1, padding=0,
+                             bias=True)
+        self.fam = nn.Conv2d(in_channels=self.cs, out_channels=self.cs, kernel_size=1, stride=1, padding=0, bias=True)
+        self.dec = nn.Conv2d(in_channels=self.cs, out_channels=sum(self.cts), kernel_size=1, stride=1, padding=0,
+                             bias=True)
+
     def forward(self, fs, fts):
-        rep = self.enc( torch.cat( fts, dim=1 ) )
-        _fts = self.dec( rep )
-        _fts = torch.split( _fts, self.cts, dim=1 )
-        _fs = self.fam( fs )
+        rep = self.enc(torch.cat(fts, dim=1))
+        _fts = self.dec(rep)
+        _fts = torch.split(_fts, self.cts, dim=1)
+        _fs = self.fam(fs)
         return rep, _fs, _fts
+
 
 class PFA_Amalgamator():
     def __init__(self, logger=None, tb_writer=None, output_dir=None):
         self.logger = logger if logger else get_logger(name='mosaic_amal', color=True)
         self.tb_writer = tb_writer
         self.output_dir = output_dir
-    
+
     def setup(
-        self, 
-        args,
-        student,
-        teachers: [],
-        netG,
-        netD,
-        layer_groups: typing.Sequence[typing.Sequence],
-        layer_channels: typing.Sequence[typing.Sequence],
-        train_loader: [], 
-        val_loaders: [],
-        val_num_classes: [],
-        optimizers: [], 
-        schedulers: [],
-        device=None,
+            self,
+            args,
+            student,
+            teachers: [],
+            netG,
+            netD,
+            layer_groups: typing.Sequence[typing.Sequence],
+            layer_channels: typing.Sequence[typing.Sequence],
+            train_loader: [],
+            val_loaders: [],
+            val_num_classes: [],
+            optimizers: [],
+            schedulers: [],
+            device=None,
     ):
         if device is None:
-            device = torch.device( 'cuda' if torch.cuda.is_available() else 'cpu' )
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.device = device
         self.ood_with_aug_loader, self.ood_without_aug_loader = train_loader
         self.ood_with_aug_iter = DataIter(self.ood_with_aug_loader)
@@ -66,7 +70,7 @@ class PFA_Amalgamator():
         self.val_loaders = val_loaders
         self.val_num_classes = val_num_classes
         self.student = student.to(self.device)
-        self.teachers = nn.ModuleList(teachers).to(self.device) 
+        self.teachers = nn.ModuleList(teachers).to(self.device)
         self.netG = netG.to(self.device)
         self.netD = netD.to(self.device)
         self.optim_s, self.optim_g, self.optim_d = optimizers
@@ -77,54 +81,52 @@ class PFA_Amalgamator():
         self.batch_size = args.batch_size
         self.bn_hooks = []
         amal_blocks = []
-        
-        # 为三个模型每个卷积层添加hook 模块间添加融合
-        # hook获取中间特征
-        # amal_blocks 包含融合模块hook和通道信息
+
+        # add hook to amalgamation features
         with set_mode(self.student, training=True), \
-             set_mode(self.teachers, training=False):
+                set_mode(self.teachers, training=False):
             rand_in = torch.randn([1, 3, 32, 32]).cuda()
-            _, s_feas = self.student( rand_in, return_features=True)
-            _, t0_feas = self.teachers[0]( rand_in, return_features=True)
-            _, t1_feas = self.teachers[1]( rand_in, return_features=True )
-            
+            _, s_feas = self.student(rand_in, return_features=True)
+            _, t0_feas = self.teachers[0](rand_in, return_features=True)
+            _, t1_feas = self.teachers[1](rand_in, return_features=True)
+
             for s_fea, t0_fea, t1_fea in zip(s_feas, t0_feas, t1_feas):
                 cs = s_fea.shape[1]
                 cts = [t0_fea.shape[1], t1_fea.shape[1]]
                 amal_block = AmalBlock(cs=cs, cts=cts).to(self.device).train()
                 amal_blocks.append(amal_block)
         self._amal_blocks = amal_blocks
-        
-    def train(self, max_iter, start_iter=0, epoch_length=None ):
+
+    def train(self, max_iter, start_iter=0, epoch_length=None):
         self.iter = start_iter
         self.max_iter = max_iter
         self.epoch_length = epoch_length if epoch_length else len(self.ood_with_aug_loader)
         best_acc1 = 0
-        
-        # 获得所有优化参数
+
         block_params = []
         for block in self._amal_blocks:
-            block_params.extend( list(block.parameters()) )
-        if isinstance( self.optim_s, torch.optim.SGD ):
-            self.optim_amal = torch.optim.SGD( block_params, lr=self.optim_s.param_groups[0]['lr'], momentum=0.9, weight_decay=1e-4 )
+            block_params.extend(list(block.parameters()))
+        if isinstance(self.optim_s, torch.optim.SGD):
+            self.optim_amal = torch.optim.SGD(block_params, lr=self.optim_s.param_groups[0]['lr'], momentum=0.9,
+                                              weight_decay=1e-4)
         else:
-            self.optim_amal = torch.optim.Adam( block_params, lr=self.optim_s.param_groups[0]['lr'], weight_decay=1e-4 )
-        self.sched_amal = torch.optim.lr_scheduler.CosineAnnealingLR( self.optim_amal, T_max=max_iter )
-        
+            self.optim_amal = torch.optim.Adam(block_params, lr=self.optim_s.param_groups[0]['lr'], weight_decay=1e-4)
+        self.sched_amal = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim_amal, T_max=max_iter)
+
         for m in self.teachers[0].modules():
             if isinstance(m, nn.BatchNorm2d):
-                self.bn_hooks.append( DeepInversionHook(m) )
-        
+                self.bn_hooks.append(DeepInversionHook(m))
+
         for m in self.teachers[1].modules():
             if isinstance(m, nn.BatchNorm2d):
-                self.bn_hooks.append( DeepInversionHook(m) )
+                self.bn_hooks.append(DeepInversionHook(m))
 
         with set_mode(self.student, training=True), \
-             set_mode(self.teachers, training=False), \
-             set_mode(self.netG, training=True), \
-             set_mode(self.netD, training=True):
-            for self.iter in range( start_iter, max_iter ):
-                
+                set_mode(self.teachers, training=False), \
+                set_mode(self.netG, training=True), \
+                set_mode(self.netD, training=True):
+            for self.iter in range(start_iter, max_iter):
+
                 ###############################
                 # Patch Discrimination
                 ###############################
@@ -134,62 +136,64 @@ class PFA_Amalgamator():
                 images = self.normalizer(images)
                 d_out_fake = self.netD(images.detach())
                 d_out_real = self.netD(real.detach())
-        
-                loss_d = (F.binary_cross_entropy_with_logits(d_out_fake, torch.zeros_like(d_out_fake), reduction='sum') + \
-                          F.binary_cross_entropy_with_logits(d_out_real, torch.ones_like(d_out_real), reduction='sum')) / \
-                          (2*len(d_out_fake)) * self.args.local
-                
+
+                # patch discrimination loss
+                loss_d = (F.binary_cross_entropy_with_logits(d_out_fake, torch.zeros_like(d_out_fake),
+                                                             reduction='sum') + \
+                          F.binary_cross_entropy_with_logits(d_out_real, torch.ones_like(d_out_real),
+                                                             reduction='sum')) / \
+                         (2 * len(d_out_fake)) * self.args.local
+
                 self.optim_d.zero_grad()
                 loss_d.backward()
-                self.optim_d.step()                
-                
+                self.optim_d.step()
+
                 ###############################
                 # Generation
                 ###############################
-                t0_out, t0_feas = self.teachers[0]( images, return_features=True )
-                t1_out, t1_feas = self.teachers[1]( images, return_features=True )
-                t_out = [ t0_out,t1_out ]
+                t0_out, t0_feas = self.teachers[0](images, return_features=True)
+                t1_out, t1_feas = self.teachers[1](images, return_features=True)
+                t_out = [t0_out, t1_out]
                 s_out = self.student(images)
-                
-                pyx = [ F.softmax(i, dim = 1) for i in t_out ]
-                py = [ i.mean(0) for i in pyx ]
-                
-                # Mosaicking to distill
+
+                pyx = [F.softmax(i, dim=1) for i in t_out]
+                py = [i.mean(0) for i in pyx]
+
                 d_out_fake = self.netD(images)
-                # fool the patch discriminator
-                loss_local = F.binary_cross_entropy_with_logits(d_out_fake, torch.ones_like(d_out_fake), reduction='sum') / len(d_out_fake)
-                # label space aligning
+                # patch discrimination loss
+                loss_local = F.binary_cross_entropy_with_logits(d_out_fake, torch.ones_like(d_out_fake),
+                                                                reduction='sum') / len(d_out_fake)
+                # bn loss
                 loss_bn = sum([h.r_feature for h in self.bn_hooks])
-                # fool the student
+                # adv loss
                 loss_adv = -kldiv(s_out, torch.cat(t_out, dim=1))
-                
-                # loss_oh =  sum( [ -(pyx[i] * log_softmax_pyx[i]).sum(1).mean() for i in range(2)] )
-                loss_oh = sum( [ F.cross_entropy( i, i.max(1)[1] ) for i in t_out] )
-                # Alleviating Mode Collapse for unconditional GAN
-                loss_balance = sum([ (i * torch.log2(i)).sum() for i in py ])
-                
+                # oh loss
+                loss_oh = sum([F.cross_entropy(i, i.max(1)[1]) for i in t_out])
+                # balance loss
+                loss_balance = sum([(i * torch.log2(i)).sum() for i in py])
+                # feature similarity loss
                 loss_sim = 0.0
-                for (f0,f1) in zip(t0_feas, t1_feas):
+                for (f0, f1) in zip(t0_feas, t1_feas):
                     N, C, H, W = f0.shape
                     f0 = f0.view(N, C, -1)
                     f1 = f1.view(N, C, -1)
                     f0 = F.normalize(f0, p=2, dim=2)
                     f1 = F.normalize(f1, p=2, dim=2)
-                    sim_mat = torch.abs(torch.matmul(f0, f1.permute(0,2,1)))
+                    sim_mat = torch.abs(torch.matmul(f0, f1.permute(0, 2, 1)))
                     loss_sim += (1 - sim_mat).mean()
-                    
-                # Final loss: L_align + L_local + L_adv (DRO) + L_balance
+
+                # Final loss
                 loss_g = self.args.adv * loss_adv + \
                          self.args.local * loss_local + \
                          self.args.balance * loss_balance + \
                          self.args.bn * loss_bn + \
                          self.args.oh * loss_oh + \
                          self.args.sim * loss_sim
-                
+
                 self.optim_g.zero_grad()
                 loss_g.backward()
                 self.optim_g.step()
-                
+
                 ###############################
                 # Knowledge Amalgamation
                 ###############################
@@ -198,127 +202,122 @@ class PFA_Amalgamator():
                     vis_images = images = self.netG(z)
                     images = self.normalizer(images)
                     ood_images = self.ood_with_aug_iter.next()[0].to(self.device)
-                    data = torch.cat([images, ood_images]) 
-                                                 
+                    data = torch.cat([images, ood_images])
+
                     ka_output = self.ka_step(data)
 
                 self.sched_s.step()
                 self.sched_g.step()
                 self.sched_d.step()
                 self.sched_amal.step()
-                                                 
+
                 # STEP END
-                if self.iter%100 == 0:
+                if self.iter % 100 == 0:
                     self.logger.info('loss_d: %.4f' % loss_d)
                     self.logger.info('loss_g: %.4f' % loss_g)
-                    self.logger.info('loss_adv: %.4f, loss_local: %.4f, loss_oh: %.4f, loss_balance: %.4f, loss_bn: %.4f, loss_sim: %.4f' %
-                                    (loss_adv, loss_local, loss_oh, loss_balance, loss_bn, loss_sim))
+                    self.logger.info(
+                        'loss_adv: %.4f, loss_local: %.4f, loss_oh: %.4f, loss_balance: %.4f, loss_bn: %.4f, loss_sim: %.4f' %
+                        (loss_adv, loss_local, loss_oh, loss_balance, loss_bn, loss_sim))
                     self.logger.info('loss_ka: %.4f' % ka_output['loss_ka'])
                     self.logger.info('loss_kd: %.4f, loss_amal: %.4f, loss_recons: %.4f' %
-                                      (ka_output['loss_kd'], ka_output['loss_amal'],ka_output['loss_recons']))
+                                     (ka_output['loss_kd'], ka_output['loss_amal'], ka_output['loss_recons']))
                     self.logger.info('optim_s_lr: %.6f, optim_g_lr: %.6f, optim_d_lr: %.6f, optim_amal_lr: %.6f' %
-                                    (self.optim_s.param_groups[0]['lr'], self.optim_g.param_groups[0]['lr'], 
-                                     self.optim_d.param_groups[0]['lr'], self.optim_amal.param_groups[0]['lr']))
-                    
+                                     (self.optim_s.param_groups[0]['lr'], self.optim_g.param_groups[0]['lr'],
+                                      self.optim_d.param_groups[0]['lr'], self.optim_amal.param_groups[0]['lr']))
+
                 # EPOCH END
-                if self.epoch_length!=None and (self.iter+1)%self.epoch_length==0:
+                if self.epoch_length != None and (self.iter + 1) % self.epoch_length == 0:
                     acc1 = self.validate()
                     is_best = acc1 > best_acc1
                     best_acc1 = max(acc1, best_acc1)
                     save_checkpoint({
-                        'epoch': self.iter//self.epoch_length,
+                        'epoch': self.iter // self.epoch_length,
                         's_state_dict': self.student.state_dict(),
                         'g_state_dict': self.netG.state_dict(),
                         'd_state_dict': self.netD.state_dict(),
                         'best_acc1': float(best_acc1),
-                        'optim_s' : self.optim_s.state_dict(),
-                        'optim_g' : self.optim_g.state_dict(),
-                        'optim_d' : self.optim_d.state_dict(),
-                        'optim_amal' : self.optim_amal.state_dict(),
+                        'optim_s': self.optim_s.state_dict(),
+                        'optim_g': self.optim_g.state_dict(),
+                        'optim_d': self.optim_d.state_dict(),
+                        'optim_amal': self.optim_amal.state_dict(),
                         'sched_s': self.sched_s.state_dict(),
                         'sched_g': self.sched_g.state_dict(),
                         'sched_d': self.sched_d.state_dict(),
                         'sched_amal': self.sched_amal.state_dict(),
                     }, is_best, os.path.join(self.output_dir, 'best.pth'))
-                    save_image_batch( self.normalizer(real, True), os.path.join(self.output_dir, 'ood_data.png'))
-                    save_image_batch( vis_images, os.path.join(self.output_dir, 'mosaic_data.png'))
-                    
-        self.logger.info("Best: %.4f"%best_acc1)
-                    
+                    save_image_batch(self.normalizer(real, True), os.path.join(self.output_dir, 'ood_data.png'))
+                    save_image_batch(vis_images, os.path.join(self.output_dir, 'mosaic_data.png'))
+
+        self.logger.info("Best: %.4f" % best_acc1)
+
     def ka_step(self, data):
-        # 获取ts 输出
-        s_out, s_feas = self.student( data, return_features=True )
+        s_out, s_feas = self.student(data, return_features=True)
         with torch.no_grad():
-            t0_out, t0_feas = self.teachers[0]( data, return_features=True )
-            t1_out, t1_feas = self.teachers[1]( data, return_features=True )
-            
+            t0_out, t0_feas = self.teachers[0](data, return_features=True)
+            t1_out, t1_feas = self.teachers[1](data, return_features=True)
+
         loss_amal = 0
         loss_recons = 0
         for amal_block, s_fea, t0_fea, t1_fea in zip(self._amal_blocks, s_feas, t0_feas, t1_feas):
             fs, fts = s_fea, [t0_fea, t1_fea]
-            rep, _fs, _fts = amal_block( fs, fts )
-            # 自编码解码保持结构不变性 所以用融合后的紧实特征和目前特征计算
-            loss_amal += F.mse_loss( _fs, rep.detach() )
-            # 以及衡量教师特征的恢复能力
-            loss_recons += sum( [ F.mse_loss( _ft, ft ) for (_ft, ft) in zip( _fts, fts ) ] )
-                                                 
+            rep, _fs, _fts = amal_block(fs, fts)
+            # encoder loss
+            loss_amal += F.mse_loss(_fs, rep.detach())
+            # decoder loss
+            loss_recons += sum([F.mse_loss(_ft, ft) for (_ft, ft) in zip(_fts, fts)])
+
         # 输出kd损失
-        loss_kd = kldiv( s_out, torch.cat( [t0_out, t1_out], dim=1 ) )
-        #loss_kd = F.mse_loss( s_out, torch.cat( t_out, dim=1 ) )
-        loss_dict = { "loss_kd":      self.args.kd * loss_kd,
-                      "loss_amal":    self.args.amal * loss_amal,
-                      "loss_recons":  self.args.recons * loss_recons }
+        loss_kd = kldiv(s_out, torch.cat([t0_out, t1_out], dim=1))
+        loss_dict = {"loss_kd": self.args.kd * loss_kd,
+                     "loss_amal": self.args.amal * loss_amal,
+                     "loss_recons": self.args.recons * loss_recons}
         loss_ka = sum(loss_dict.values())
-                                                 
+
         self.optim_s.zero_grad()
         self.optim_amal.zero_grad()
         loss_ka.backward()
-        # 先调整融合模块 再微调整个网络
         self.optim_s.step()
         self.optim_amal.step()
-                                                 
-        metrics = { loss_name: loss_value.item() for (loss_name, loss_value) in loss_dict.items() }
+
+        metrics = {loss_name: loss_value.item() for (loss_name, loss_value) in loss_dict.items()}
         metrics.update({'loss_ka': loss_ka.item()})
         return metrics
-    
+
     def validate(self):
-        # batch_time = AverageMeter('Time', ':6.3f')
         losses = AverageMeter('Loss', ':.4e')
         part_top1 = [AverageMeter('Part0_Acc@1', ':6.2f'), AverageMeter('Part1_Acc@1', ':6.2f')]
         part_top5 = [AverageMeter('Part0_Acc@5', ':6.2f'), AverageMeter('Part1_Acc@5', ':6.2f')]
-        total_top1 =  AverageMeter('Total_Acc@1', ':6.2f')
-        total_top5 =  AverageMeter('Total_Acc@5', ':6.2f')
-        # switch to evaluate mode
+        total_top1 = AverageMeter('Total_Acc@1', ':6.2f')
+        total_top5 = AverageMeter('Total_Acc@5', ':6.2f')
+
         with set_mode(self.student, training=False), \
-             set_mode(self.teachers, training=False):
+                set_mode(self.teachers, training=False):
             with torch.no_grad():
                 for i, val_loader in enumerate(self.val_loaders):
-                # end = time.time()
+
                     for batch in val_loader:
                         batch = move_to_device(batch, self.device)
                         data, target = batch
-                        # compute & cut output
-                        output = self.student(data)[:, sum(self.val_num_classes[:i]):sum(self.val_num_classes[:i+1])]
-                        # measure accuracy and record loss
+
+                        output = self.student(data)[:, sum(self.val_num_classes[:i]):sum(self.val_num_classes[:i + 1])]
+
                         acc1, acc5 = accuracy(output, target, topk=(1, 5))
                         part_top1[i].update(acc1[0], data.size(0))
-                        part_top5[i].update(acc5[0], data.size(0))          
+                        part_top5[i].update(acc5[0], data.size(0))
                         total_top1.update(acc1[0], data.size(0))
                         total_top5.update(acc5[0], data.size(0))
-                        # measure elapsed time
-                        # batch_time.update(time.time() - end)
-                        # end = time.time()
+
                 self.logger.info(' [Eval] Epoch={}'
-                        .format(self.iter//self.epoch_length))
+                                 .format(self.iter // self.epoch_length))
                 self.logger.info(' [Eval] Part0 Acc@1={:.4f} Acc@5={:.4f}'
-                        .format(part_top1[0].avg, part_top5[0].avg))
+                                 .format(part_top1[0].avg, part_top5[0].avg))
                 self.logger.info(' [Eval] Part1 Acc@1={:.4f} Acc@5={:.4f}'
-                        .format(part_top1[1].avg, part_top5[1].avg))
+                                 .format(part_top1[1].avg, part_top5[1].avg))
                 self.logger.info(' [Eval] Total Acc@1={:.4f} Acc@5={:.4f}'
-                        .format(total_top1.avg, total_top5.avg))
+                                 .format(total_top1.avg, total_top5.avg))
         return total_top1.avg
 
-    
+
 def save_checkpoint(state, is_best, filename='checkpoint.pth'):
     if is_best:
         torch.save(state, filename)
@@ -326,6 +325,7 @@ def save_checkpoint(state, is_best, filename='checkpoint.pth'):
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
+
     def __init__(self, name, fmt=':f'):
         self.name = name
         self.fmt = fmt
