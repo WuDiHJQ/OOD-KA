@@ -197,7 +197,7 @@ class PFA_Amalgamator():
                 ###############################
                 # Knowledge Amalgamation
                 ###############################
-                for _ in range(self.args.k):
+                for _ in range(self.args.k_step):
                     z = torch.randn(size=(self.batch_size, self.z_dim), device=self.device)
                     vis_images = images = self.netG(z)
                     images = self.normalizer(images)
