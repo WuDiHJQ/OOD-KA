@@ -1,7 +1,3 @@
-import os
-
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-
 from torchvision import datasets, transforms as T
 from engine.utils import DataIter, get_logger, flatten_dict, move_to_device, set_mode
 from engine.criterions import kldiv

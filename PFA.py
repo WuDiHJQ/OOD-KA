@@ -1,7 +1,3 @@
-import os
-
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-
 import engine
 from engine import metrics, evaluators
 from engine.utils import get_logger, flatten_dict
