@@ -120,6 +120,8 @@ def main():
                     'sched_s': sched_s.state_dict(),
                 }, is_best, os.path.join(output_dir, 'best.pth'))
 
+    logger.info("Best: %.4f" % best_acc1)
+
 
 def validate(epoch, student, val_loaders, val_num_classes, logger, device):
     losses = AverageMeter('Loss', ':.4e')
