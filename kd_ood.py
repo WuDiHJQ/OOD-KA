@@ -1,6 +1,6 @@
 import engine
 import pickle
-from engine.utils import get_logger, flatten_dict, prepare_ood_subset, move_to_device, set_mode
+from engine.utils import DataIter, get_logger, flatten_dict, prepare_ood_subset, move_to_device, set_mode
 from engine.criterions import kldiv
 
 import torch, time, os
