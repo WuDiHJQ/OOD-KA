@@ -96,9 +96,9 @@ def main():
     # ==================================================
     # ==================== Trainer =====================
     # ==================================================
-    output_dir = 'run/mosaic_ka-%s' % (time.asctime().replace(' ', '_'))
+    output_dir = 'run/PFA-%s' % (time.asctime().replace(' ', '_'))
     trainer = PFA_Amalgamator(
-        logger=get_logger(name='mosaic-ka', output=os.path.join(output_dir, 'log.txt')),
+        logger=get_logger(name='PFA', output=os.path.join(output_dir, 'log.txt')),
         tb_writer=SummaryWriter(log_dir=output_dir),
         output_dir=output_dir
     )
