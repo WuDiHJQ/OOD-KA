@@ -2,14 +2,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from engine.utils import DataIter, save_image_batch
+from engine.utils import DataIter, save_image_batch, move_to_device, set_mode
 from engine.hooks import FeatureHook, DeepInversionHook
 from engine.criterions import kldiv
 
 import typing
 import time
 import os
-from engine.utils import move_to_device, set_mode
 
 
 class AmalBlock(nn.Module):
@@ -246,7 +245,7 @@ class PFA_Amalgamator():
                         'sched_amal': self.sched_amal.state_dict(),
                     }, is_best, os.path.join(self.output_dir, 'best.pth'))
                     save_image_batch(self.normalizer(real, True), os.path.join(self.output_dir, 'ood_data.png'))
-                    save_image_batch(vis_images, os.path.join(self.output_dir, 'mosaic_data.png'))
+                    save_image_batch(vis_images, os.path.join(self.output_dir, 'synthetic_data.png'))
 
         self.logger.info("Best: %.4f" % best_acc1)
 

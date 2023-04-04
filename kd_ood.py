@@ -1,10 +1,12 @@
-from torchvision import datasets, transforms as T
-from engine.utils import DataIter, get_logger, flatten_dict, move_to_device, set_mode
+import engine
+import pickle
+from engine.utils import get_logger, flatten_dict, prepare_ood_subset, move_to_device, set_mode
 from engine.criterions import kldiv
 
 import torch, time, os
-import registry
 import torch.nn as nn
+import registry
+from torch.utils.tensorboard import SummaryWriter
 
 import argparse
 
@@ -27,17 +29,17 @@ args = parser.parse_args()
 
 
 def main():
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # ==================================================
-    # ==================== dataset =====================
+    # ==================== Dataset =====================
     # ==================================================
     part0_num_classes, part0_train, part0_val = registry.get_dataset(name='%s_part0' % (args.dataset),
                                                                      data_root=args.data_root)
     part1_num_classes, part1_train, part1_val = registry.get_dataset(name='%s_part1' % (args.dataset),
                                                                      data_root=args.data_root)
-    _, ood_with_aug, _ = registry.get_dataset(name=args.unlabeled, data_root=args.data_root)
 
     # ==================================================
-    # ===================== model ======================
+    # ===================== Model ======================
     # ==================================================
     part0_teacher = registry.get_model(args.model, num_classes=part0_num_classes, pretrained=False)
     part1_teacher = registry.get_model(args.model, num_classes=part1_num_classes, pretrained=False)
@@ -49,9 +51,32 @@ def main():
         torch.load('checkpoints/pretrained/%s_part1_%s.pth' % (args.dataset, args.model))['state_dict'])
 
     # ==================================================
+    # ================== OOD Dataset ===================
+    # ==================================================
+    _, ood_with_aug, _ = registry.get_dataset(name=args.unlabeled, data_root=args.data_root)
+    _, ood_without_aug, _ = registry.get_dataset(name=args.unlabeled, data_root=args.data_root)
+
+    ood_with_aug.transforms = ood_with_aug.transform = part0_train.transform  # with aug
+    ood_without_aug.transforms = ood_without_aug.transform = part0_val.transform  # without aug
+
+    if args.unlabeled in ['imagenet_32x32', 'places365_32x32']:
+        ood_index_root = os.path.join(args.data_root, 'ood_index_%s_%s.pkl' % (args.unlabeled, args.model))
+
+        if not os.path.exists(ood_index_root):
+            ood_index = prepare_ood_subset(ood_without_aug, 50000,
+                                           nn.ModuleList([part0_teacher, part1_teacher]).to(device))
+
+            with open(ood_index_root, 'wb') as f:
+                pickle.dump(ood_index, f)
+
+        with open(ood_index_root, 'rb') as f:
+            ood_index = pickle.load(f)
+        ood_with_aug.samples = [ood_with_aug.samples[i] for i in ood_index]
+        ood_without_aug.samples = [ood_without_aug.samples[i] for i in ood_index]
+
+    # ==================================================
     # =================== DataLoader ===================
     # ==================================================
-    ood_with_aug.transforms = ood_with_aug.transform = part0_train.transform  # with aug
     ood_with_aug_loader = torch.utils.data.DataLoader(ood_with_aug, batch_size=args.batch_size, shuffle=True,
                                                       num_workers=4)
     ood_with_aug_iter = DataIter(ood_with_aug_loader)
@@ -64,7 +89,6 @@ def main():
     val_num_classes = [part0_num_classes, part1_num_classes]
 
     TOTAL_ITERS = len(ood_with_aug_loader) * args.epochs
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     optim_s = torch.optim.Adam(student.parameters(), lr=args.lr, weight_decay=1e-4)
     sched_s = torch.optim.lr_scheduler.CosineAnnealingLR(optim_s, T_max=TOTAL_ITERS)
 
@@ -74,8 +98,8 @@ def main():
     # ==================================================
     # ==================== Logger ======================
     # ==================================================
-    output_dir = 'run/vanilla_kd-%s' % (time.asctime().replace(' ', '_'))
-    logger = get_logger(name='vanilla-kd', output=os.path.join(output_dir, 'log.txt'))
+    output_dir = 'run/kd_ood-%s' % (time.asctime().replace(' ', '_'))
+    logger = get_logger(name='kd-ood', output=os.path.join(output_dir, 'log.txt'))
 
     for k, v in flatten_dict(vars(args)).items():  # print args
         logger.info("%s: %s" % (k, v))
