@@ -168,7 +168,7 @@ def get_dataset(name: str, data_root: str='data', return_transform=False, split=
         train_dst = VOCSegmentation(data_root, '2012', 'train', transform=train_transform)
         val_dst = VOCSegmentation(data_root, '2012', 'val', transform=val_transform)
     elif name=='nyu':
-        num_classes = 40
+        num_classes = 13
         crop_size = 512
         train_transform = eT.ExtCompose([
             eT.ExtRandomScale((0.5, 2.0)),

@@ -1,8 +1,6 @@
 from tqdm import tqdm
-import engine
 from engine.models import deeplab
 from engine import utils
-from engine.utils import ext_transforms as eT
 from engine.metrics import StreamSegMetrics
 import os
 import random
@@ -13,10 +11,6 @@ import registry
 import torch
 import torch.nn as nn
 from torch.utils import data
-
-from PIL import Image
-import matplotlib
-import matplotlib.pyplot as plt
 
 
 def get_argparser():
@@ -36,8 +30,6 @@ def get_argparser():
 
     # Train Options
     parser.add_argument("--test_only", action='store_true', default=False)
-    parser.add_argument("--save_val_results", action='store_true', default=False,
-                        help="save segmentation results to \"./results\"")
     parser.add_argument("--total_itrs", type=int, default=30e3,
                         help="epoch number (default: 30k)")
     parser.add_argument("--lr", type=float, default=0.01,
@@ -49,7 +41,6 @@ def get_argparser():
                         help='batch size (default: 16)')
     parser.add_argument("--val_batch_size", type=int, default=4,
                         help='batch size for validation (default: 4)')
-    parser.add_argument("--crop_size", type=int, default=512)
 
     parser.add_argument("--ckpt", default=None, type=str,
                         help="restore from checkpoint")
@@ -71,17 +62,9 @@ def get_argparser():
 def validate(args, model, loader, device, metrics):
     """Do validation and return specified samples"""
     metrics.reset()
-    ret_samples = []
-    if args.save_val_results:
-        if not os.path.exists('results'):
-            os.mkdir('results')
-        denorm = utils.Denormalize(mean=[0.485, 0.456, 0.406],
-                                   std=[0.229, 0.224, 0.225])
-        img_id = 0
 
     with torch.no_grad():
         for i, (images, labels) in tqdm(enumerate(loader)):
-
             images = images.to(device, dtype=torch.float32)
             labels = labels.to(device, dtype=torch.long)
 
@@ -91,42 +74,16 @@ def validate(args, model, loader, device, metrics):
 
             metrics.update(targets, preds)
 
-            if args.save_val_results:
-                for i in range(len(images)):
-                    image = images[i].detach().cpu().numpy()
-                    target = targets[i]
-                    pred = preds[i]
-
-                    image = (denorm(image) * 255).transpose(1, 2, 0).astype(np.uint8)
-                    target = loader.dataset.decode_target(target).astype(np.uint8)
-                    pred = loader.dataset.decode_target(pred).astype(np.uint8)
-
-                    Image.fromarray(image).save('results/%d_image.png' % img_id)
-                    Image.fromarray(target).save('results/%d_target.png' % img_id)
-                    Image.fromarray(pred).save('results/%d_pred.png' % img_id)
-
-                    fig = plt.figure()
-                    plt.imshow(image)
-                    plt.axis('off')
-                    plt.imshow(pred, alpha=0.7)
-                    ax = plt.gca()
-                    ax.xaxis.set_major_locator(matplotlib.ticker.NullLocator())
-                    ax.yaxis.set_major_locator(matplotlib.ticker.NullLocator())
-                    plt.savefig('results/%d_overlay.png' % img_id, bbox_inches='tight', pad_inches=0)
-                    plt.close()
-                    img_id += 1
-
         score = metrics.get_results()
-    return score, ret_samples
+    return score
 
 
 def main():
     args = get_argparser().parse_args()
-    args.logger = engine.utils.logger.get_logger('%s-%s' % (args.dataset, args.model),
-                                                 output='checkpoints/scratch/log-%s-%s.txt' % (
-                                                 args.dataset, args.model))
+    args.logger = utils.logger.get_logger('%s-%s' % (args.dataset, args.model),
+                                          output='checkpoints/scratch/log-%s-%s.txt' % (args.dataset, args.model))
 
-    for k, v in engine.utils.flatten_dict(vars(args)).items():
+    for k, v in utils.flatten_dict(vars(args)).items():
         args.logger.info("%s: %s" % (k, v))
 
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
@@ -161,15 +118,12 @@ def main():
         {'params': model.backbone.parameters(), 'lr': 0.1 * args.lr},
         {'params': model.classifier.parameters(), 'lr': args.lr},
     ], lr=args.lr, momentum=0.9, weight_decay=args.weight_decay)
-    # optimizer = torch.optim.SGD(params=model.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.weight_decay)
-    # torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_decay_step, gamma=args.lr_decay_factor)
     if args.lr_policy == 'poly':
         scheduler = utils.PolyLR(optimizer, args.total_itrs, power=0.9)
     elif args.lr_policy == 'step':
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=0.1)
 
     # Set up criterion
-    # criterion = utils.get_loss(args.loss_type)
     if args.loss_type == 'focal_loss':
         criterion = utils.FocalLoss(ignore_index=255, size_average=True)
     elif args.loss_type == 'cross_entropy':
@@ -193,7 +147,6 @@ def main():
     cur_itrs = 0
     cur_epochs = 0
     if args.ckpt is not None and os.path.isfile(args.ckpt):
-        # https://github.com/VainF/DeepLabV3Plus-Pytorch/issues/8#issuecomment-605601402, @PytaichukBohdan
         checkpoint = torch.load(args.ckpt, map_location=torch.device('cpu'))
         model.load_state_dict(checkpoint["model_state"])
         model = nn.DataParallel(model)
@@ -212,11 +165,9 @@ def main():
         model.to(device)
 
     # ==========   Train Loop   ==========#
-    denorm = utils.Denormalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # denormalization for ori images
-
     if args.test_only:
         model.eval()
-        val_score, ret_samples = validate(
+        val_score = validate(
             args=args, model=model, loader=val_loader, device=device, metrics=metrics)
         args.logger.info(metrics.to_str(val_score))
         return
@@ -252,7 +203,7 @@ def main():
                           (args.model, args.dataset, args.output_stride))
                 args.logger.info("validation...")
                 model.eval()
-                val_score, ret_samples = validate(
+                val_score = validate(
                     args=args, model=model, loader=val_loader, device=device, metrics=metrics)
                 args.logger.info(metrics.to_str(val_score))
                 if val_score['Mean IoU'] > best_score:  # save best model
