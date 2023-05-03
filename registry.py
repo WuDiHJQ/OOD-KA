@@ -1,7 +1,9 @@
 from engine.models import classifiers, deeplab
 from torchvision import datasets, transforms as T
 from engine.utils import sync_transforms as sT
+from engine.utils import ext_transforms as eT
 from engine.datasets import CIFAR100_PART
+from engine.datasets import VOCSegmentation
 
 from PIL import PngImagePlugin
 LARGE_ENOUGH_NUMBER = 100
@@ -12,18 +14,17 @@ import os
 import torch
 import torchvision
 import engine
-import torch.nn as nn 
+import torch.nn as nn
 from PIL import Image
 
 NORMALIZE_DICT = {
-    # In-domain data
     'cifar100':         dict( mean=(0.5071, 0.4867, 0.4408),    std=(0.2675, 0.2565, 0.2761) ),
-    # Out-of-domain data
     'cifar10':          dict( mean=(0.4914, 0.4822, 0.4465),    std=(0.2023, 0.1994, 0.2010) ),
     'imagenet':         dict( mean=[0.485, 0.456, 0.406],       std=[0.229, 0.224, 0.225]),
     'svhn':             dict( mean=(0.5, 0.5, 0.5),             std=(0.5, 0.5, 0.5) ),
     'places365_32x32':  dict( mean=(0.5, 0.5, 0.5),             std=(0.5, 0.5, 0.5) ),
     'imagenet_32x32':   dict( mean=(0.5, 0.5, 0.5),             std=(0.5, 0.5, 0.5) ),
+    'voc':              dict( mean=[0.485, 0.456, 0.406],       std=[0.229, 0.224, 0.225]),
 }
 
 
@@ -52,7 +53,7 @@ MODEL_DICT = {
 
 def get_model(name: str, num_classes, pretrained=False, **kwargs):
     model = MODEL_DICT[name](num_classes=num_classes)
-    return model 
+    return model
 
 def get_dataset(name: str, data_root: str='data', return_transform=False, split=['A', 'B', 'C', 'D']):
     name = name.lower()
@@ -71,7 +72,7 @@ def get_dataset(name: str, data_root: str='data', return_transform=False, split=
             T.ToTensor(),
             T.Normalize( **NORMALIZE_DICT[name] ),
         ])
-        data_root = os.path.join( data_root, 'torchdata' ) 
+        data_root = os.path.join( data_root, 'torchdata' )
         train_dst = datasets.CIFAR10(data_root, train=True, download=True, transform=train_transform)
         val_dst = datasets.CIFAR10(data_root, train=False, download=True, transform=val_transform)
     elif name=='cifar100':
@@ -86,7 +87,7 @@ def get_dataset(name: str, data_root: str='data', return_transform=False, split=
             T.ToTensor(),
             T.Normalize( **NORMALIZE_DICT[name] ),
         ])
-        data_root = os.path.join( data_root, 'torchdata' ) 
+        data_root = os.path.join( data_root, 'torchdata' )
         train_dst = datasets.CIFAR100(data_root, train=True, download=True, transform=train_transform)
         val_dst = datasets.CIFAR100(data_root, train=False, download=True, transform=val_transform)
     elif name=='cifar100_part0' or name=='cifar100_part1':
@@ -101,7 +102,7 @@ def get_dataset(name: str, data_root: str='data', return_transform=False, split=
             T.ToTensor(),
             T.Normalize( **NORMALIZE_DICT['cifar100'] ),
         ])
-        data_root = os.path.join( data_root, 'torchdata' ) 
+        data_root = os.path.join( data_root, 'torchdata' )
         train_dst = CIFAR100_PART(data_root, train=True, part=name[-1], transform=train_transform)
         val_dst = CIFAR100_PART(data_root, train=False, part=name[-1], transform=val_transform)
     elif name=='svhn':
@@ -114,7 +115,7 @@ def get_dataset(name: str, data_root: str='data', return_transform=False, split=
             T.ToTensor(),
             T.Normalize( **NORMALIZE_DICT[name] ),
         ])
-        data_root = os.path.join( data_root, 'torchdata' ) 
+        data_root = os.path.join( data_root, 'torchdata' )
         train_dst = datasets.SVHN(data_root, split='train', download=True, transform=train_transform)
         val_dst = datasets.SVHN(data_root, split='test', download=True, transform=val_transform)
     elif name=='imagenet_32x32':
@@ -129,7 +130,7 @@ def get_dataset(name: str, data_root: str='data', return_transform=False, split=
             T.ToTensor(),
             T.Normalize(**NORMALIZE_DICT[name]),
         ])
-        data_root = os.path.join( data_root, 'ImageNet_32x32' ) 
+        data_root = os.path.join( data_root, 'ImageNet_32x32' )
         train_dst = datasets.ImageFolder(os.path.join(data_root, 'train'), transform=train_transform)
         val_dst = datasets.ImageFolder(os.path.join(data_root, 'val'), transform=val_transform)
     elif name=='places365_32x32':
@@ -144,9 +145,27 @@ def get_dataset(name: str, data_root: str='data', return_transform=False, split=
             T.ToTensor(),
             T.Normalize(**NORMALIZE_DICT[name]),
         ])
-        data_root = os.path.join( data_root, 'Places365_32x32' ) 
+        data_root = os.path.join( data_root, 'Places365_32x32' )
         train_dst = datasets.ImageFolder(os.path.join(data_root, 'train'), transform=train_transform)
         val_dst = datasets.ImageFolder(os.path.join(data_root, 'val'), transform=val_transform)
+    elif name=='voc':
+        num_classes = 21
+        crop_size = 512
+        train_transform = et.ExtCompose([
+            eT.ExtRandomScale((0.5, 2.0)),
+            eT.ExtRandomCrop(size=(crop_size, crop_size), pad_if_needed=True),
+            eT.ExtRandomHorizontalFlip(),
+            eT.ExtToTensor(),
+            eT.ExtNormalize(**NORMALIZE_DICT[name]),
+        ])
+        val_transform = et.ExtCompose([
+            eT.ExtResize(crop_size),
+            eT.ExtCenterCrop(crop_size),
+            eT.ExtToTensor(),
+            eT.ExtNormalize(**NORMALIZE_DICT[name]),
+        ])
+        train_dst = VOCSegmentation(data_root, '2012', 'train', transform=train_transform)
+        val_dst = VOCSegmentation(data_root, '2012', 'val', transform=val_transform)
     else:
         raise NotImplementedError
 
