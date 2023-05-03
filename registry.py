@@ -4,7 +4,7 @@ from engine.utils import sync_transforms as sT
 from engine.utils import ext_transforms as eT
 from engine.datasets import CIFAR100_PART
 from engine.datasets import VOCSegmentation
-
+from engine.datasets import NYUv2
 from PIL import PngImagePlugin
 LARGE_ENOUGH_NUMBER = 100
 PngImagePlugin.MAX_TEXT_CHUNK = LARGE_ENOUGH_NUMBER * (1024**2)
@@ -25,6 +25,7 @@ NORMALIZE_DICT = {
     'places365_32x32':  dict( mean=(0.5, 0.5, 0.5),             std=(0.5, 0.5, 0.5) ),
     'imagenet_32x32':   dict( mean=(0.5, 0.5, 0.5),             std=(0.5, 0.5, 0.5) ),
     'voc':              dict( mean=[0.485, 0.456, 0.406],       std=[0.229, 0.224, 0.225]),
+    'nyu':              dict( mean=[0.485, 0.456, 0.406],       std=[0.229, 0.224, 0.225]),
 }
 
 
@@ -151,14 +152,14 @@ def get_dataset(name: str, data_root: str='data', return_transform=False, split=
     elif name=='voc':
         num_classes = 21
         crop_size = 512
-        train_transform = et.ExtCompose([
+        train_transform = eT.ExtCompose([
             eT.ExtRandomScale((0.5, 2.0)),
             eT.ExtRandomCrop(size=(crop_size, crop_size), pad_if_needed=True),
             eT.ExtRandomHorizontalFlip(),
             eT.ExtToTensor(),
             eT.ExtNormalize(**NORMALIZE_DICT[name]),
         ])
-        val_transform = et.ExtCompose([
+        val_transform = eT.ExtCompose([
             eT.ExtResize(crop_size),
             eT.ExtCenterCrop(crop_size),
             eT.ExtToTensor(),
@@ -166,6 +167,24 @@ def get_dataset(name: str, data_root: str='data', return_transform=False, split=
         ])
         train_dst = VOCSegmentation(data_root, '2012', 'train', transform=train_transform)
         val_dst = VOCSegmentation(data_root, '2012', 'val', transform=val_transform)
+    elif name=='nyu':
+        num_classes = 40
+        crop_size = 512
+        train_transform = eT.ExtCompose([
+            eT.ExtRandomScale((0.5, 2.0)),
+            eT.ExtRandomCrop(size=(crop_size, crop_size), pad_if_needed=True),
+            eT.ExtRandomHorizontalFlip(),
+            eT.ExtToTensor(),
+            eT.ExtNormalize(**NORMALIZE_DICT[name]),
+        ])
+        val_transform = eT.ExtCompose([
+            eT.ExtResize(crop_size),
+            eT.ExtCenterCrop(crop_size),
+            eT.ExtToTensor(),
+            eT.ExtNormalize(**NORMALIZE_DICT[name]),
+        ])
+        train_dst = NYUv2(data_root, 'train', 'semantic', num_classes, transform=train_transform)
+        val_dst = NYUv2(data_root,  'test', 'semantic', num_classes, transform=val_transform)
     else:
         raise NotImplementedError
 

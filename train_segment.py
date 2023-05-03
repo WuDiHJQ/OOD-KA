@@ -26,9 +26,7 @@ def get_argparser():
     parser.add_argument("--data_root", type=str, default='data',
                         help="path to Dataset")
     parser.add_argument("--dataset", type=str, default='voc',
-                        choices=['voc', 'cityscapes'], help='Name of dataset')
-    parser.add_argument("--num_classes", type=int, default=None,
-                        help="num classes (default: None)")
+                        choices=['voc', 'nyu'], help='Name of dataset')
 
     # Deeplab Options
     parser.add_argument("--model", type=str, default='deeplabv3plus_mobilenet')
