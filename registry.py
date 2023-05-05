@@ -151,9 +151,9 @@ def get_dataset(name: str, data_root: str='data', return_transform=False, split=
         val_dst = datasets.ImageFolder(os.path.join(data_root, 'val'), transform=val_transform)
     elif name=='voc':
         num_classes = 21
-        crop_size = 512
+        crop_size = 256
         train_transform = eT.ExtCompose([
-            eT.ExtRandomScale((0.5, 2.0)),
+            eT.ExtRandomScale((0.5, 1.0)),
             eT.ExtRandomCrop(size=(crop_size, crop_size), pad_if_needed=True),
             eT.ExtRandomHorizontalFlip(),
             eT.ExtToTensor(),
@@ -169,9 +169,9 @@ def get_dataset(name: str, data_root: str='data', return_transform=False, split=
         val_dst = VOCSegmentation(data_root, '2012', 'val', transform=val_transform)
     elif name=='nyu':
         num_classes = 13
-        crop_size = 512
+        crop_size = 256
         train_transform = eT.ExtCompose([
-            eT.ExtRandomScale((0.5, 2.0)),
+            eT.ExtRandomScale((0.5, 1.0)),
             eT.ExtRandomCrop(size=(crop_size, crop_size), pad_if_needed=True),
             eT.ExtRandomHorizontalFlip(),
             eT.ExtToTensor(),

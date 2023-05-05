@@ -106,8 +106,6 @@ def main():
 
     # Set up model (all models are 'constructed at network.modeling)
     model = deeplab.modeling.__dict__[args.model](num_classes=num_classes, output_stride=args.output_stride)
-    if args.separable_conv and 'plus' in args.model:
-        network.convert_to_separable_conv(model.classifier)
     utils.set_bn_momentum(model.backbone, momentum=0.01)
 
     # Set up metrics

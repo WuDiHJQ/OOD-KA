@@ -4,17 +4,20 @@ import numpy as np
 import torch.nn.functional as F
 from collections import OrderedDict
 
+
 class _SimpleSegmentationModel(nn.Module):
     def __init__(self, backbone, classifier):
         super(_SimpleSegmentationModel, self).__init__()
         self.backbone = backbone
         self.classifier = classifier
-        
-    def forward(self, x):
+
+    def forward(self, x, return_features=False):
         input_shape = x.shape[-2:]
         features = self.backbone(x)
         x = self.classifier(features)
         x = F.interpolate(x, size=input_shape, mode='bilinear', align_corners=False)
+        if return_features:
+            return x, features
         return x
 
 
@@ -49,6 +52,7 @@ class IntermediateLayerGetter(nn.ModuleDict):
         >>>     [('feat1', torch.Size([1, 64, 56, 56])),
         >>>      ('feat2', torch.Size([1, 256, 14, 14]))]
     """
+
     def __init__(self, model, return_layers):
         if not set(return_layers).issubset([name for name, _ in model.named_children()]):
             raise ValueError("return_layers are not present in model")

@@ -1,3 +1,7 @@
+import os
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
 import engine
 import pickle
 from engine.utils import get_logger, flatten_dict, prepare_ood_subset
@@ -126,23 +130,11 @@ def main():
     for k, v in flatten_dict(vars(args)).items():  # print args
         trainer.logger.info("%s: %s" % (k, v))
 
-    # ==================================================
-    # ================== Amal Layer ====================
-    # ==================================================
-    layer_groups = []
-    layer_channels = []
-    for stu_block, part0_block, part1_block in zip(student.modules(), part0_teacher.modules(), part1_teacher.modules()):
-        if isinstance(stu_block, torch.nn.Conv2d):
-            layer_groups.append([stu_block, part0_block, part1_block])
-            layer_channels.append([stu_block.out_channels, part0_block.out_channels, part1_block.out_channels])
-
     trainer.setup(args=args,
                   student=student,
                   teachers=[part0_teacher, part1_teacher],
                   netG=netG,
                   netD=netD,
-                  layer_groups=layer_groups,
-                  layer_channels=layer_channels,
                   train_loader=[ood_with_aug_loader, ood_without_aug_loader],
                   val_loaders=[part0_val_loader, part1_val_loader],
                   val_num_classes=[part0_num_classes, part1_num_classes],

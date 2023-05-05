@@ -51,8 +51,6 @@ class PFA_Amalgamator():
             teachers: [],
             netG,
             netD,
-            layer_groups: typing.Sequence[typing.Sequence],
-            layer_channels: typing.Sequence[typing.Sequence],
             train_loader: [],
             val_loaders: [],
             val_num_classes: [],

@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class Flatten(nn.Module):
     def __init__(self):
         super(Flatten, self).__init__()
@@ -18,21 +19,21 @@ class Generator(nn.Module):
         self.l1 = nn.Sequential(nn.Linear(nz, ngf * 4 * self.init_size ** 2))
 
         self.conv_blocks = nn.Sequential(
-            #nn.Conv2d(ngf*8, ngf*4, 3, stride=1, padding=1),
+            # nn.Conv2d(ngf*8, ngf*4, 3, stride=1, padding=1),
             nn.BatchNorm2d(ngf * 4),
             nn.Upsample(scale_factor=2),
 
-            nn.Conv2d(ngf*4, ngf*2, 3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(ngf*2),
+            nn.Conv2d(ngf * 4, ngf * 2, 3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(ngf * 2),
             nn.LeakyReLU(0.2, inplace=True),
 
             nn.Upsample(scale_factor=2),
-            nn.Conv2d(ngf*2, ngf, 3, stride=1, padding=1, bias=False),
+            nn.Conv2d(ngf * 2, ngf, 3, stride=1, padding=1, bias=False),
             nn.BatchNorm2d(ngf),
             nn.LeakyReLU(0.2, inplace=True),
 
             nn.Conv2d(ngf, nc, 3, stride=1, padding=1),
-            nn.Sigmoid(),   
+            nn.Sigmoid(),
         )
 
     def forward(self, z):
@@ -41,31 +42,31 @@ class Generator(nn.Module):
         img = self.conv_blocks(out)
         return img
 
+
 class CondGenerator(nn.Module):
     def __init__(self, nz=100, ngf=64, img_size=32, nc=3, num_classes=100):
         super(CondGenerator, self).__init__()
         self.num_classes = num_classes
         self.emb = nn.Embedding(num_classes, nz)
         self.init_size = img_size // 4
-        self.l1 = nn.Sequential(nn.Linear(2*nz, ngf * 4 * self.init_size ** 2))
-        
+        self.l1 = nn.Sequential(nn.Linear(2 * nz, ngf * 4 * self.init_size ** 2))
+
         self.conv_blocks = nn.Sequential(
             nn.BatchNorm2d(ngf * 4),
 
             nn.Upsample(scale_factor=2),
-            nn.Conv2d(ngf*4, ngf*2, 3, stride=1, padding=1),
-            nn.BatchNorm2d(ngf*2),
+            nn.Conv2d(ngf * 4, ngf * 2, 3, stride=1, padding=1),
+            nn.BatchNorm2d(ngf * 2),
             nn.LeakyReLU(0.2, inplace=True),
 
             nn.Upsample(scale_factor=2),
-            nn.Conv2d(ngf*2, ngf, 3, stride=1, padding=1),
+            nn.Conv2d(ngf * 2, ngf, 3, stride=1, padding=1),
             nn.BatchNorm2d(ngf),
             nn.LeakyReLU(0.2, inplace=True),
 
             nn.Conv2d(ngf, nc, 3, stride=1, padding=1),
-            nn.Sigmoid(),   
+            nn.Sigmoid(),
         )
-
 
     def forward(self, z, y):
         y = self.emb(y)
@@ -74,6 +75,7 @@ class CondGenerator(nn.Module):
         out = out.view(out.shape[0], -1, self.init_size, self.init_size)
         img = self.conv_blocks(out)
         return img
+
 
 class Discriminator(nn.Module):
     def __init__(self, nc=3, img_size=32, ndf=64):
@@ -102,6 +104,7 @@ class Discriminator(nn.Module):
         validity = self.adv_layer(out)
         return validity
 
+
 class PatchDiscriminator(nn.Module):
     def __init__(self, nc=3, ndf=128, output_stride=1):
         super(PatchDiscriminator, self).__init__()
@@ -119,7 +122,7 @@ class PatchDiscriminator(nn.Module):
             # state size. (ndf*4) x 8 x 8
             nn.Conv2d(ndf * 2, 1, 1, 1, 0, bias=False),
         )
-    
+
     def forward(self, input):
         return self.main(input)[:, :, ::self.output_stride, ::self.output_stride]
 
@@ -144,31 +147,32 @@ class DeeperPatchDiscriminator(nn.Module):
     def __init__(self, nc=3, ndf=64):
         super(DeeperPatchDiscriminator, self).__init__()
         self.main = nn.Sequential(
-            # input is (nc) x 224 x 224
+            # input is (nc) x 256 x 256
             nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
 
-            # state size. (ndf) x 112 x 112
+            # state size. (ndf) x 128 x 128
             nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ndf * 2),
             nn.LeakyReLU(0.2, inplace=True),
-            
-            # state size. (ndf*2) x 56 x 56
+
+            # state size. (ndf*2) x 64 x 64
             nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ndf * 4),
             nn.LeakyReLU(0.2, inplace=True),
 
-            # 24 x 24
+            # 32 x 32
             nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ndf * 8),
             nn.LeakyReLU(0.2, inplace=True),
 
-            # state size. (ndf*4) x 14 x 14
+            # state size. (ndf*4) x 16 x 16
             nn.Conv2d(ndf * 8, 1, 1, 1, 0, bias=False),
         )
-    
+
     def forward(self, input):
         return self.main(input)
+
 
 class DeepGenerator(nn.Module):
     def __init__(self, nz=100, ngf=64, img_size=32, nc=3):
@@ -206,7 +210,7 @@ class DeepGenerator(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
 
             nn.Conv2d(ngf, nc, 3, stride=1, padding=1),
-            nn.Sigmoid(),   
+            nn.Sigmoid(),
         )
 
     def forward(self, z):
@@ -228,7 +232,7 @@ class DeepPatchDiscriminator(nn.Module):
             nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ndf * 2),
             nn.LeakyReLU(0.2, inplace=True),
-            
+
             # state size. (ndf*2) x 56 x 56
             nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ndf * 4),
@@ -237,7 +241,7 @@ class DeepPatchDiscriminator(nn.Module):
             # state size. (ndf*4) x 28 x 28
             nn.Conv2d(ndf * 4, 1, 1, 1, 0, bias=False),
         )
-    
+
     def forward(self, input):
         return self.main(input)
 
