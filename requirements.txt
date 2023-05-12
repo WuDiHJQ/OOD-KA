@@ -1,0 +1,12 @@
+matplotlib
+numpy
+pandas
+Pillow
+scikit_learn
+scipy
+seaborn
+termcolor
+torch
+torchsummary
+torchvision
+tqdm
