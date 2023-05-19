@@ -38,7 +38,7 @@ class AmalBlock(nn.Module):
         return rep, _fs, _fts
 
 
-class PFA_Amalgamator():
+class OOD_KA_Amalgamator():
     def __init__(self, logger=None, tb_writer=None, output_dir=None):
         self.logger = logger if logger else get_logger(name='mosaic_amal', color=True)
         self.tb_writer = tb_writer

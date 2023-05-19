@@ -4,32 +4,30 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 import engine
 import pickle
-from engine.utils import get_logger, flatten_dict, set_bn_momentum, PolyLR
-from PFA_amal_deeplab import PFA_Amalgamator_DeepLab
-from engine.models import deeplab
+from engine.utils import get_logger, flatten_dict, prepare_ood_subset
+from OOD_KA_amal import OOD_KA_Amalgamator
+
 import torch, time, os
 import torch.nn as nn
 import registry
 from torch.utils.tensorboard import SummaryWriter
-from engine.datasets import OOD_Segment
 
 import argparse
 
 parser = argparse.ArgumentParser()
 # model & dataset
 parser.add_argument('--data_root', default='data')
-parser.add_argument('--model', default='deeplabv3plus_mobilenet')
-parser.add_argument('--dataset0', default='voc')
-parser.add_argument('--dataset1', default='nyu')
-parser.add_argument("--output_stride", type=int, default=16, choices=[8, 16])
+parser.add_argument('--model', default='wrn16_2')
+parser.add_argument('--dataset', default='cifar100')
+parser.add_argument('--unlabeled', default='cifar10')
 # train detail
 parser.add_argument('--epochs', default=200, type=int,
                     help='number of total epochs to run')
-parser.add_argument('-b', '--batch_size', default=16, type=int)
-parser.add_argument('--lr', default=1e-2, type=float,
+parser.add_argument('-b', '--batch_size', default=256, type=int)
+parser.add_argument('--lr', default=1e-3, type=float,
                     help='initial learning rate')
 parser.add_argument('--lr_g', default=1e-3, type=float)
-parser.add_argument('--z_dim', default=256, type=int)
+parser.add_argument('--z_dim', default=100, type=int)
 parser.add_argument('-k', '--k_step', default=5, type=int)
 # loss weight
 parser.add_argument('--oh', default=1.0, type=float)
@@ -37,7 +35,7 @@ parser.add_argument('--bn', default=1.0, type=float)
 parser.add_argument('--local', default=1.0, type=float)
 parser.add_argument('--adv', default=1.0, type=float)
 parser.add_argument('--sim', default=1.0, type=float)
-parser.add_argument('--balance', default=1.0, type=float)
+parser.add_argument('--balance', default=10.0, type=float)
 parser.add_argument('--kd', default=1.0, type=float)
 parser.add_argument('--amal', default=1.0, type=float)
 parser.add_argument('--recons', default=1.0, type=float)
@@ -52,41 +50,52 @@ def main():
     # ==================================================
     # ==================== Dataset =====================
     # ==================================================
-    part0_num_classes, part0_train, part0_val = registry.get_dataset(name=args.dataset0, data_root=args.data_root)
-    part1_num_classes, part1_train, part1_val = registry.get_dataset(name=args.dataset1, data_root=args.data_root)
+    part0_num_classes, part0_train, part0_val = registry.get_dataset(name='%s_part0' % (args.dataset),
+                                                                     data_root=args.data_root)
+    part1_num_classes, part1_train, part1_val = registry.get_dataset(name='%s_part1' % (args.dataset),
+                                                                     data_root=args.data_root)
 
     # ==================================================
     # ===================== Model ======================
     # ==================================================
-    part0_teacher = deeplab.modeling.__dict__[args.model](num_classes=part0_num_classes,
-                                                          output_stride=args.output_stride)
-    part1_teacher = deeplab.modeling.__dict__[args.model](num_classes=part1_num_classes,
-                                                          output_stride=args.output_stride)
-    student = deeplab.modeling.__dict__[args.model](num_classes=part0_num_classes + part1_num_classes,
-                                                    output_stride=args.output_stride)
-    set_bn_momentum(part0_teacher.backbone, momentum=0.01)
-    set_bn_momentum(part1_teacher.backbone, momentum=0.01)
-    set_bn_momentum(student.backbone, momentum=0.01)
+    part0_teacher = registry.get_model(args.model, num_classes=part0_num_classes, pretrained=False)
+    part1_teacher = registry.get_model(args.model, num_classes=part1_num_classes, pretrained=False)
+    student = registry.get_model(args.model, num_classes=part0_num_classes + part1_num_classes, pretrained=False)
 
-    netG = engine.models.generator.DcGanGenerator(nz=args.z_dim, nc=3)
-    netD = engine.models.generator.DeeperPatchDiscriminator(nc=3, ndf=64)
+    netG = engine.models.generator.Generator(nz=args.z_dim, nc=3, img_size=32)
+    netD = engine.models.generator.PatchDiscriminator(nc=3, ndf=128)
 
     part0_teacher.load_state_dict(
-        torch.load('checkpoints/pretrained/%s_%s.pth' % (args.dataset0, args.model))['model_state'])
+        torch.load('checkpoints/pretrained/%s_part0_%s.pth' % (args.dataset, args.model))['state_dict'])
     part1_teacher.load_state_dict(
-        torch.load('checkpoints/pretrained/%s_%s.pth' % (args.dataset1, args.model))['model_state'])
+        torch.load('checkpoints/pretrained/%s_part1_%s.pth' % (args.dataset, args.model))['state_dict'])
 
     # ==================================================
     # ================== OOD Dataset ===================
     # ==================================================
-    normalizer = engine.utils.Normalizer(**registry.NORMALIZE_DICT[args.dataset0])
+    normalizer = engine.utils.Normalizer(**registry.NORMALIZE_DICT[args.dataset])
     args.normalizer = normalizer
 
-    ood_with_aug = OOD_Segment("data/ImageNet_subset")
-    ood_without_aug = OOD_Segment("data/ImageNet_subset")
+    _, ood_with_aug, _ = registry.get_dataset(name=args.unlabeled, data_root=args.data_root)
+    _, ood_without_aug, _ = registry.get_dataset(name=args.unlabeled, data_root=args.data_root)
 
     ood_with_aug.transforms = ood_with_aug.transform = part0_train.transform  # with aug
     ood_without_aug.transforms = ood_without_aug.transform = part0_val.transform  # without aug
+
+    if args.unlabeled in ['imagenet_32x32', 'places365_32x32']:
+        ood_index_root = os.path.join(args.data_root, 'ood_index_%s_%s.pkl' % (args.unlabeled, args.model))
+
+        if not os.path.exists(ood_index_root):
+            ood_index = prepare_ood_subset(ood_without_aug, 50000,
+                                           nn.ModuleList([part0_teacher, part1_teacher]).to(device))
+
+            with open(ood_index_root, 'wb') as f:
+                pickle.dump(ood_index, f)
+
+        with open(ood_index_root, 'rb') as f:
+            ood_index = pickle.load(f)
+        ood_with_aug.samples = [ood_with_aug.samples[i] for i in ood_index]
+        ood_without_aug.samples = [ood_without_aug.samples[i] for i in ood_index]
 
     # ==================================================
     # =================== DataLoader ===================
@@ -102,11 +111,8 @@ def main():
     # =================== Optimizer ====================
     # ==================================================
     TOTAL_ITERS = len(ood_with_aug_loader) * args.epochs
-    optim_s = torch.optim.SGD(params=[
-        {'params': student.backbone.parameters(), 'lr': 0.1 * args.lr},
-        {'params': student.classifier.parameters(), 'lr': args.lr},
-    ], lr=args.lr, momentum=0.9, weight_decay=1e-4)
-    sched_s = PolyLR(optim_s, TOTAL_ITERS, power=0.9)
+    optim_s = torch.optim.Adam(student.parameters(), lr=args.lr, weight_decay=1e-4)
+    sched_s = torch.optim.lr_scheduler.CosineAnnealingLR(optim_s, T_max=TOTAL_ITERS)
     optim_g = torch.optim.Adam(netG.parameters(), lr=args.lr_g, betas=[0.5, 0.999])
     sched_g = torch.optim.lr_scheduler.CosineAnnealingLR(optim_g, T_max=TOTAL_ITERS)
     optim_d = torch.optim.Adam(netD.parameters(), lr=args.lr_g, betas=[0.5, 0.999])
@@ -115,9 +121,9 @@ def main():
     # ==================================================
     # ==================== Trainer =====================
     # ==================================================
-    output_dir = 'run/PFA_deeplab_%s' % (time.asctime().replace(' ', '_'))
-    trainer = PFA_Amalgamator_DeepLab(
-        logger=get_logger(name='PFA-deeplab', output=os.path.join(output_dir, 'log.txt')),
+    output_dir = 'run/OOD_KA_%s' % (time.asctime().replace(' ', '_'))
+    trainer = OOD_KA_Amalgamator(
+        logger=get_logger(name='OOD-KA', output=os.path.join(output_dir, 'log.txt')),
         tb_writer=SummaryWriter(log_dir=output_dir),
         output_dir=output_dir
     )

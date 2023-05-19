@@ -1,4 +1,4 @@
-# PFA
-Code for paper "Patch and Feature Amalgamate: Knowledge Amalgamation via Out-of-Domain Data"
+# OOD-KA
+Code for paper "OOD-KA: Amalgamating Knowledge in the Wild"
 
 README in building...
