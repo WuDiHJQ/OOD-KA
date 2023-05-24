@@ -3,7 +3,7 @@ Code for paper "OOD-KA: Amalgamating Knowledge in the Wild"
 
 
 <div align="center">
-<img src="assets/OOD_KA.png" width="100%"></img> 
+<img src="assets/OOD_KA.png" width="90%"></img> 
 </div>
 
 
@@ -17,5 +17,5 @@ python split_cifar100.py
 
 
 <div align="center">
-<img src="assets/results.png" width="100%"></img> 
+<img src="assets/results.png" width="90%"></img> 
 </div>
