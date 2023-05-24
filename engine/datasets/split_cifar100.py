@@ -86,7 +86,7 @@ class CIFAR100_PART(Dataset):
         
         
 if __name__ == '__main__':
-    root = '/home/jovyan/Python/MosaicKD/data/torchdata'
+    root = 'data/torchdata'
     load_split_cifar100(root)
     c100_train1 = CIFAR100_PART(root, train=True, part = 0)
     c100_train2 = CIFAR100_PART(root, train=True, part = 1)
