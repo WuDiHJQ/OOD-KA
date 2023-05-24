@@ -1,23 +1,13 @@
-# OOD_KA reproduce
-python OOD_KA.py --model vgg16 --unlabeled cifar10
-python OOD_KA.py --model vgg16 --unlabeled svhn
-python OOD_KA.py --model vgg16 --unlabeled imagenet_32x32
-python OOD_KA.py --model vgg16 --unlabeled places365_32x32
-
-
-python OOD_KA.py --model resnet18 --unlabeled cifar10
-python OOD_KA.py --model resnet18 --unlabeled svhn
-python OOD_KA.py --model resnet18 --unlabeled imagenet_32x32
-python OOD_KA.py --model resnet18 --unlabeled places365_32x32
-
-
-python OOD_KA.py --model wrn40_2 --unlabeled cifar10
-python OOD_KA.py --model wrn40_2 --unlabeled svhn
-python OOD_KA.py --model wrn40_2 --unlabeled imagenet_32x32
-python OOD_KA.py --model wrn40_2 --unlabeled places365_32x32
-
-
-python OOD_KA.py --model wrn16_2 --unlabeled cifar10
-python OOD_KA.py --model wrn16_2 --unlabeled svhn
-python OOD_KA.py --model wrn16_2 --unlabeled imagenet_32x32
-python OOD_KA.py --model wrn16_2 --unlabeled places365_32x32
+# OOD_KA
+python OOD_KA.py \
+--model wrn16_2 \
+--unlabeled cifar10 \
+--lr 1e-3 \
+--lr_g 1e-3 \
+--z_dim 100 \
+--oh 1.0 \
+--bn 1.0 \
+--local 1.0 \
+--adv 1.0 \
+--sim 1.0 \
+--balance 10.0
