@@ -6,6 +6,12 @@ Code for paper "OOD-KA: Amalgamating Knowledge in the Wild"
 <img src="assets/OOD_KA.png" width="80%"></img> 
 </div>
 
+## Requirements
+
+To install requirements:
+```bash
+pip install -r requirements.txt
+```
 
 ## Reproduce our results
 
